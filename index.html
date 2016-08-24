@@ -1,0 +1,1089 @@
+<html>
+<body>
+<script type="text/javascript">
+
+// main
+
+function main()
+{
+	var timeStart = new Date();
+
+	var mesh = MeshHelper.buildOctahedron("World");
+
+	var timesToSubdivide = 6;
+
+	for (var i = 0; i < timesToSubdivide; i++)
+	{
+		mesh = mesh.subdivide();
+		MeshHelper.meshSpherify(mesh, 1);
+	}
+
+	var timeEnd = new Date();
+	var durationInMilliseconds = timeEnd - timeStart;
+
+	Debug.message("Calculated in " + durationInMilliseconds + "ms");
+
+	var camera = new Camera
+	(
+		"Camera0",
+		200, // focalLength
+		new Coords(200, 200, 200), // viewSize
+		new Location
+		(
+			new Coords(1, 1, -1), // pos
+			new Orientation
+			(
+				new Coords(-1, -1, 1), // forward
+				new Coords(0, 0, 1) // down
+			)
+		)
+	);
+
+	camera.constraints.push
+	(
+		new Constraint_MaintainDistance
+		(
+			new Coords(0, 0, 0), // center
+			(camera.focalLength / 80) // distanceToMaintain
+		)
+	);
+
+	camera.constraints.push
+	(
+		new Constraint_LookAtBody
+		(
+			new Empty
+			(
+				new Location
+				(
+					new Coords(0, 0, 0),
+					new Orientation
+					(
+						new Coords(1, 0, 0),
+						new Coords(0, 0, 1)
+					)
+				)
+			)
+		)
+	);
+
+	camera.constraints.addLookups("name");
+
+	var scene = new Scene
+	(
+		mesh,
+		camera
+	);
+
+	var meshEditor = new SceneViewer(scene);
+
+	Globals.Instance.initialize
+	(
+		meshEditor,
+		20 // timerTicksPerSecond 
+	);
+}
+
+// extensions
+
+Array.prototype.addLookups = function(propertyPathForKey)
+{
+	var propertyNameAncestryForKey = propertyPathForKey.split(".");
+
+	for (var i = 0; i < this.length; i++)
+	{
+		var item = this[i];
+
+		var keyValue = item[propertyNameAncestryForKey[0]];
+
+		for (var p = 1; p < propertyNameAncestryForKey.length; p++)
+		{
+			var propertyNameForKey = propertyNameAncestryForKey[p];
+			keyValue = keyValue[propertyNameForKey];
+		}
+		this[keyValue] = item;
+	}
+}
+
+// classes
+
+function Camera(name, focalLength, viewSize, loc)
+{
+	this.name = name;
+	this.focalLength = focalLength;
+	this.viewSize = viewSize;
+	this.loc = loc;
+
+	this.viewSizeHalf = this.viewSize.clone().divideScalar(2);
+	this.constraints = [];
+}	
+{
+	Camera.prototype.convertWorldCoordsToViewCoords = function(coordsToConvert)
+	{
+		var orientation = this.loc.orientation;
+
+		coordsToConvert.subtract
+		(
+			this.loc.pos
+		);
+
+		var distanceAlongCameraForward = coordsToConvert.dotProduct
+		(
+			orientation.forward
+		);
+
+		coordsToConvert.overwriteWithXYZ
+		(
+			coordsToConvert.dotProduct(orientation.right),
+			coordsToConvert.dotProduct(orientation.down),
+			distanceAlongCameraForward
+		).multiplyScalar
+		(
+			this.focalLength	
+		).divideScalar
+		(
+			distanceAlongCameraForward
+		).add
+		(
+			this.viewSizeHalf
+		);	
+	}
+
+	// scene
+
+	Camera.prototype.updateForTimerTick = function()
+	{
+		for (var i = 0; i < this.constraints.length; i++)
+		{
+			var constraint = this.constraints[i];
+
+			constraint.applyToBody(this);
+		}
+	}
+}
+
+function Constraint_LookAtBody
+(
+	targetBody
+)
+{
+	this.name = "LookAtBody";
+	this.targetBody = targetBody;
+}
+{
+	Constraint_LookAtBody.prototype.applyToBody = function(body)
+	{
+		var bodyOrientationForward = this.targetBody.loc.pos.clone().subtract
+		(
+			body.loc.pos
+		).normalize();
+
+		body.loc.orientation = new Orientation
+		(
+			bodyOrientationForward,
+			body.loc.orientation.down	
+		);		
+	}
+}
+
+function Constraint_MaintainDistance(center, distanceToMaintain)
+{
+	this.name = "MaintainDistance";
+	this.center = center;
+	this.distanceToMaintain = distanceToMaintain;
+}
+{
+	Constraint_MaintainDistance.prototype.applyToBody = function(body)
+	{
+		var bodyPos = body.loc.pos;
+
+		var directionFromCenterToBody = bodyPos.clone().subtract
+		(
+			this.center
+		).normalize();
+
+		bodyPos.overwriteWith
+		(
+			this.center
+		).add
+		(
+			directionFromCenterToBody.multiplyScalar
+			(
+				this.distanceToMaintain
+			)
+		);
+	}	
+}
+
+
+
+function Coords(x, y, z)
+{
+	this.x = x;
+	this.y = y;
+	this.z = z;
+}
+{
+	Coords.prototype.add = function(other)
+	{
+		this.x += other.x;
+		this.y += other.y;
+		this.z += other.z;
+
+		return this;
+	}
+
+	Coords.prototype.clone = function()
+	{
+		return new Coords(this.x, this.y, this.z);
+	}
+
+	Coords.prototype.crossProduct = function(other)
+	{
+		return this.overwriteWithXYZ
+		(
+			this.y * other.z - this.z * other.y,
+			this.z * other.x - this.x * other.z,
+			this.x * other.y - this.y * other.x
+		);
+	}
+
+	Coords.prototype.divide = function(other)
+	{
+		this.x /= other.x;
+		this.y /= other.y;
+		this.z /= other.z;
+
+		return this;
+	}
+
+	Coords.prototype.divideScalar = function(scalar)
+	{
+		this.x /= scalar;
+		this.y /= scalar;
+		this.z /= scalar;
+
+		return this;
+	}
+
+	Coords.prototype.dotProduct = function(other)
+	{
+		return this.x * other.x + this.y * other.y + this.z * other.z;
+	}
+
+	Coords.prototype.equals = function(other)
+	{
+		var returnValue = 
+		(
+			this.x == other.x
+			&& this.y == other.y
+			&& this.z == other.z
+		);
+
+		return returnValue;
+	}
+
+	Coords.prototype.magnitude = function()
+	{
+		return Math.sqrt(this.x * this.x + this.y * this.y + this.z * this.z);
+	}
+
+	Coords.prototype.multiply = function(other)
+	{
+		this.x *= other.x;
+		this.y *= other.y;
+		this.z *= other.z;
+
+		return this;
+	}
+
+	Coords.prototype.multiplyScalar = function(scalar)
+	{
+		this.x *= scalar;
+		this.y *= scalar;
+		this.z *= scalar;
+
+		return this;
+	}
+
+	Coords.prototype.normalize = function()
+	{
+		return this.divideScalar(this.magnitude());
+	}
+
+	Coords.prototype.overwriteWith = function(other)
+	{
+		this.x = other.x;
+		this.y = other.y;
+		this.z = other.z;
+
+		return this;
+	}
+
+	Coords.prototype.overwriteWithXYZ = function(x, y, z)
+	{
+		this.x = x;
+		this.y = y;
+		this.z = z;
+
+		return this;
+	}
+
+	Coords.prototype.rotateXYZ = function()
+	{
+		var temp = this.x;
+		this.x = this.y;
+		this.y = this.z;
+		this.z = temp;
+
+		return this;	
+	}
+
+	Coords.prototype.subtract = function(other)
+	{
+		this.x -= other.x;
+		this.y -= other.y;
+		this.z -= other.z;
+
+		return this;
+	}
+}
+
+function Debug()
+{}
+{
+	Debug.log = function(message)
+	{
+		var now = new Date();
+		var nowAsString = 
+			now.getHours() + ":"
+			+ now.getMinutes() + ":"
+			+ now.getSeconds() + "."
+			+ now.getMilliseconds();
+
+		Debug.message(nowAsString + " : " + message);
+	}
+
+	Debug.message = function(message)
+	{
+		var divMessage = document.createElement("div");
+		divMessage.innerHTML = message;
+		document.body.appendChild(divMessage);
+	}
+}
+
+function DisplayHelper()
+{
+	this.tempPos = new Coords(0, 0, 0);
+	this.drawPos = new Coords(0, 0, 0);
+}
+{
+	DisplayHelper.prototype.drawBackgroundForCamera = function(camera)
+	{
+		var viewSize = camera.viewSize;
+
+		this.graphics.fillStyle = "Black";
+		this.graphics.fillRect(0, 0, viewSize.x, viewSize.y);
+		this.graphics.strokeStyle = "Gray";
+		this.graphics.strokeRect(0, 0, viewSize.x, viewSize.y);
+	}
+
+	DisplayHelper.prototype.drawMeshForCamera = function(mesh, camera)
+	{
+		var cameraPos = camera.loc.pos;
+		var displacementFromCameraToFaceVertex0 = new Coords(0, 0, 0);
+
+		var vertexIndicesForFaces = mesh.vertexIndicesForFaces;
+
+		for (var f = 0; f < vertexIndicesForFaces.length; f++)
+		{
+			var vertexIndicesForFace = vertexIndicesForFaces[f];
+			var faceAltitude = 0;
+
+			var verticesInFace = [];
+
+			for (var vi = 0; vi < vertexIndicesForFace.length; vi++)
+			{
+				var vertexIndex = vertexIndicesForFace[vi];
+				var vertex = mesh.vertices[vertexIndex];
+				verticesInFace.push(vertex);
+			}
+
+			var positionsOfVerticesInFace = Vertex.positionsForMany(verticesInFace);
+			var faceNormal = Plane.normalForPlaneContainingPoints(positionsOfVerticesInFace);
+
+			displacementFromCameraToFaceVertex0.overwriteWith
+			(
+				verticesInFace[0].pos
+			).subtract
+			(
+				cameraPos
+			);
+
+			var faceNormalDotDisplacement = faceNormal.dotProduct
+			(
+				displacementFromCameraToFaceVertex0
+			);
+
+			var doesFacePointTowardCamera = (faceNormalDotDisplacement < 0);
+
+			if (doesFacePointTowardCamera == false)
+			{
+				continue;
+			}
+
+			this.graphics.beginPath();
+
+			for (var vi = 0; vi < vertexIndicesForFace.length; vi++)
+			{
+				var vertex = verticesInFace[vi];
+				faceAltitude += vertex.altitude;
+
+				camera.convertWorldCoordsToViewCoords
+				(
+					this.drawPos.overwriteWith(vertex.pos)
+				);
+
+				if (vi == 0)
+				{
+					this.graphics.moveTo
+					(
+						this.drawPos.x, this.drawPos.y
+					);
+				}
+				else
+				{
+					this.graphics.lineTo
+					(
+						this.drawPos.x, this.drawPos.y
+					);
+				}
+
+			}
+
+			this.graphics.closePath();
+
+			faceAltitude /= vertexIndicesForFace.length;
+
+			var altitudeAtLowTide = .65;
+			var altitudeAtHighTide = .67;
+			var altitudeAtTreeLine = .95;
+
+			var colorForFace;
+			if (faceAltitude < altitudeAtLowTide)
+			{
+				colorForFace = "rgb(0, 0, 128)";
+			}
+			else if (faceAltitude < altitudeAtHighTide)
+			{
+				var colorComponent = Math.floor(255 * faceAltitude);
+				colorForFace = 
+					"rgb("
+					+ colorComponent + ","
+					+ colorComponent + ","
+					+ Math.floor(colorComponent / 4)
+					+ ")";
+			}
+			else if (faceAltitude < altitudeAtTreeLine)
+			{
+				var colorComponent = Math.floor(255 * faceAltitude);
+				colorForFace = 
+					"rgb(0, " + colorComponent + ", 0)";
+			}
+			else
+			{
+				var colorComponent = Math.floor(255 * faceAltitude);
+				colorForFace = 
+					"rgb("
+					+ colorComponent + ","
+					+ colorComponent + ","
+					+ colorComponent + ")";
+			}
+
+			var isWireframe = false;
+			if (isWireframe == false)
+			{
+				this.graphics.fillStyle = colorForFace;
+				this.graphics.strokeStyle = colorForFace;
+				this.graphics.fill();
+			}
+			this.graphics.stroke();
+
+		}
+	}
+
+	DisplayHelper.prototype.drawScene = function(scene)
+	{
+		this.drawBackgroundForCamera(scene.camera);
+		this.drawMeshForCamera
+		(
+			scene.mesh,
+			scene.camera
+		);
+	}
+
+	DisplayHelper.prototype.initialize = function(viewSize)
+	{
+		this.canvas = document.createElement("canvas");
+
+		this.canvas.width = viewSize.x;
+		this.canvas.height = viewSize.y;
+
+		this.graphics = this.canvas.getContext("2d");
+
+		document.body.appendChild(this.canvas);
+	}
+}
+
+function Empty(loc)
+{
+	this.loc = loc;
+}
+
+function Plane()
+{
+	// static class
+}
+{
+	// static methods
+
+	Plane.normalForPlaneContainingPoints = function(positionsOnPlane)
+	{
+		var pos0 = positionsOnPlane[0];
+		var displacementFromPos0To1 = positionsOnPlane[1].clone().subtract(pos0);
+		var displacementFromPos0To2 = positionsOnPlane[2].clone().subtract(pos0);
+		var normal = displacementFromPos0To1.clone().crossProduct
+		(
+			displacementFromPos0To2
+		).normalize();		
+
+		return normal;
+	}
+}
+
+function Globals()
+{
+	// do nothing	
+}
+{
+	Globals.Instance = new Globals();
+
+	Globals.prototype.handleEventTimerTick = function()
+	{
+		this.timerTicksSoFar++;
+
+		this.meshEditor.updateForTimerTick();
+	}
+
+	Globals.prototype.initialize = function
+	(
+		meshEditor, 
+		timerTicksPerSecond
+	)
+	{
+		this.meshEditor = meshEditor;
+
+		this.displayHelper = new DisplayHelper();
+		this.inputHelper = new InputHelper();
+
+		this.displayHelper.initialize
+		(
+			this.meshEditor.scene.camera.viewSize
+		);
+		this.inputHelper.initialize();
+
+		this.timerTicksPerSecond = timerTicksPerSecond;
+		this.millisecondsPerTimerTick = 1000 / this.timerTicksPerSecond;
+		this.timerTicksSoFar = 0;
+		
+		setInterval
+		(
+			"Globals.Instance.handleEventTimerTick()", 
+			this.millisecondsPerTimerTick
+		)	
+	}
+}
+
+function InputHelper()
+{}
+{
+	InputHelper.prototype.handleEventKeyDown = function(event)
+	{
+		var keyCode = event.keyCode;		
+
+		var camera = Globals.Instance.meshEditor.scene.camera;
+		var constraintLook = camera.constraints["LookAtBody"];
+
+		var amountToRotate = .1;
+		var amountToZoom = .01;
+
+		if (keyCode == 65) // a
+		{
+			camera.loc.pos.subtract
+			(
+				camera.loc.orientation.right.multiplyScalar
+				(
+					amountToRotate
+				)
+			);
+		}
+		else if (keyCode == 67) // c
+		{
+			constraintLook.targetBody.loc.pos.add
+			(
+				camera.loc.orientation.right
+			);
+		}
+		else if (keyCode == 68) // d
+		{
+			camera.loc.pos.add
+			(
+				camera.loc.orientation.right.multiplyScalar
+				(
+					amountToRotate
+				)
+			);
+		}
+		else if (keyCode == 83) // s
+		{
+			camera.loc.pos.add
+			(
+				camera.loc.orientation.down.multiplyScalar
+				(
+					amountToRotate
+				)
+			);
+		}
+		else if (keyCode == 87) // w
+		{
+			camera.loc.pos.subtract
+			(
+				camera.loc.orientation.down.multiplyScalar
+				(
+					amountToRotate
+				)
+			);
+		}
+		else if (keyCode == 90) // z
+		{
+			constraintLook.targetBody.loc.pos.subtract
+			(
+				camera.loc.orientation.right
+			);
+		}
+	}
+
+	InputHelper.prototype.initialize = function()
+	{
+		document.body.onkeydown = this.handleEventKeyDown.bind(this);
+	}
+}
+
+function Location(pos, orientation)
+{
+	this.pos = pos;
+	this.orientation = orientation;
+}
+
+function Mesh(name, vertices, vertexIndicesForFaces)
+{
+	this.name = name;
+	this.vertices = vertices;
+	this.vertexIndicesForFaces = vertexIndicesForFaces;
+}
+{
+	Mesh.prototype.edges = function()
+	{
+		var edgeLookup = [];
+
+		for (var f = 0; f < this.vertexIndicesForFaces.length; f++)
+		{
+			var vertexIndicesForFace = this.vertexIndicesForFaces[f];
+
+			var numberOfVerticesInFace = vertexIndicesForFace.length;
+
+			for (var vi = 0; vi < numberOfVerticesInFace; vi++)
+			{
+				var viNext = vi + 1;
+				if (viNext >= numberOfVerticesInFace)
+				{
+					viNext = 0;
+				}
+
+				var vertexIndex = vertexIndicesForFace[vi];
+				var vertexIndexNext = vertexIndicesForFace[viNext];
+			
+				var vertexIndexMin = NumberHelper.min(vertexIndex, vertexIndexNext);
+				var vertexIndexMax = NumberHelper.max(vertexIndex, vertexIndexNext);
+
+				var edgesForVertexIndexMin = edgeLookup[vertexIndexMin];
+				if (edgesForVertexIndexMin == null)
+				{
+					edgesForVertexIndexMin = [];
+					edgeLookup[vertexIndexMin] = edgesForVertexIndexMin;
+				}
+
+				if (edgesForVertexIndexMin[vertexIndexMax] == null)
+				{
+					var vertex = this.vertices[vertexIndex];
+					var vertexNext = this.vertices[vertexIndexNext];
+					var edge = [vertex, vertexNext];
+					edgesForVertexIndexMin[vertexIndexMax] = edge;
+				}
+			}
+		}
+
+		return edgeLookup;
+	}
+
+	Mesh.prototype.subdivide = function()
+	{
+		var edgeLookup = this.edges();
+
+		var edgeMidpoints = [];
+
+		for (var vertexIndexMin in edgeLookup)
+		{
+			var edgeMidpointsForVertexIndexMin = [];
+			var edgesForVertexIndexMin = edgeLookup[vertexIndexMin];
+			for (var vertexIndexMax = 0; vertexIndexMax < edgesForVertexIndexMin.length; vertexIndexMax++)
+			{
+				var edgeVertices = edgesForVertexIndexMin[vertexIndexMax];
+				if (edgeVertices != null)
+				{
+					var edgeMidpoint = Vertex.interpolate
+					(
+						edgeVertices[0], edgeVertices[1]
+					);
+					edgeMidpointsForVertexIndexMin[vertexIndexMax] = this.vertices.length;
+					this.vertices.push(edgeMidpoint);
+				}
+			}
+
+			edgeMidpoints[vertexIndexMin] = edgeMidpointsForVertexIndexMin;
+		}
+
+		var vertexIndicesForFacesAfterSubdivide = [];
+
+		for (var f = 0; f < this.vertexIndicesForFaces.length; f++)
+		{
+			var vertexIndicesForFaceParent = this.vertexIndicesForFaces[f];
+
+			var edgeMidpointsForParent = [];
+
+			var vertexIndicesForFaceCentral = [];
+
+			for (var vi = 0; vi < vertexIndicesForFaceParent.length; vi++)
+			{
+				var viPrev = vi - 1; 
+				if (viPrev < 0)
+				{
+					viPrev = vertexIndicesForFaceParent.length - 1;
+				}
+
+				var viNext = vi + 1; 
+				if (viNext >= vertexIndicesForFaceParent.length)
+				{
+					viNext = 0;
+				}
+
+				var vertexIndex = vertexIndicesForFaceParent[vi];
+				var vertexIndexPrev = vertexIndicesForFaceParent[viPrev];
+				var vertexIndexNext = vertexIndicesForFaceParent[viNext];
+
+				var edgeVertexIndexMin = NumberHelper.min(vertexIndex, vertexIndexNext);
+				var edgeVertexIndexMax = NumberHelper.max(vertexIndex, vertexIndexNext);	
+				var edgeParent = edgeLookup[edgeVertexIndexMin][edgeVertexIndexMax];
+
+				var edgePrevVertexIndexMin = NumberHelper.min(vertexIndex, vertexIndexPrev);
+				var edgePrevVertexIndexMax = NumberHelper.max(vertexIndex, vertexIndexPrev);
+				var edgeParentPrev = edgeLookup[edgePrevVertexIndexMin][edgePrevVertexIndexMax];
+					
+				var vertexIndexOfEdgeParentMidpoint = edgeMidpoints[edgeVertexIndexMin][edgeVertexIndexMax];
+				var vertexIndexOfEdgeParentMidpointPrev = edgeMidpoints[edgePrevVertexIndexMin][edgePrevVertexIndexMax];
+
+				vertexIndicesForFaceCentral.push(vertexIndexOfEdgeParentMidpoint);
+
+				var vertexIndicesForFaceCorner = 
+				[
+					vertexIndex,
+					vertexIndexOfEdgeParentMidpoint,
+					vertexIndexOfEdgeParentMidpointPrev, 
+				];
+
+				vertexIndicesForFacesAfterSubdivide.push(vertexIndicesForFaceCorner);
+			}
+
+			vertexIndicesForFacesAfterSubdivide.push
+			(
+				vertexIndicesForFaceCentral
+			);
+		}
+
+		this.vertexIndicesForFaces = vertexIndicesForFacesAfterSubdivide;
+
+		return this;
+	}
+}
+
+function MeshHelper()
+{
+	// static class
+}
+{
+	MeshHelper.buildOctahedron = function(name)
+	{
+		var returnValue = new Mesh
+		(
+			name, 
+			// vertices
+			[ 
+				new Vertex(new Coords(0, 0, -1)), // 0 - top
+				new Vertex(new Coords(1, 0, 0)), // 1 - east
+				new Vertex(new Coords(0, 1, 0)), // 2 - south
+				new Vertex(new Coords(-1, 0, 0)), // 3 - west
+				new Vertex(new Coords(0, -1, 0)), // 4 - north
+				new Vertex(new Coords(0, 0, 1)), // 5 - bottom
+
+
+			],
+			// vertexIndicesForFaces
+			[
+				[0, 2, 1], // top southeast
+				[0, 3, 2], // top southwest
+				[0, 4, 3], // top northwest
+				[0, 1, 4], // top northeast
+	
+				[5, 1, 2], // bottom southeast
+				[5, 2, 3], // bottom southwest
+				[5, 3, 4], // bottom northwest
+				[5, 4, 1], // bottom northeast
+
+			]
+		);
+
+		return returnValue;
+	}
+
+	MeshHelper.meshSpherify = function(meshToSpherify, radius)
+	{
+		var centerOfSphere = new Coords(0, 0, 0);
+
+		var vertices = meshToSpherify.vertices;
+		var numberOfVertices = vertices.length;
+		
+		if (radius == null)
+		{
+			var sumOfDistances = 0;
+
+			var displacementOfVertexFromCenter = new Coords(0, 0, 0);		
+	
+			for (var i = 0; i < numberOfVertices; i++)
+			{
+				var vertex = vertices[i];
+				var vertexPos = vertex.pos;
+	
+				displacementOfVertexFromCenter.overwriteWith
+				(
+					vertexPos
+				).subtract
+				(
+					centerOfSphere
+				);
+	
+				var distanceOfVertexFromCenter = displacementOfVertexFromCenter.magnitude();
+	
+				sumOfDistances += distanceOfVertexFromCenter;
+			}
+
+			radius = sumOfDistances / numberOfVertices;
+		}
+
+		for (var i = 0; i < numberOfVertices; i++)
+		{
+			var vertex = vertices[i];
+			vertex.pos.normalize().multiplyScalar(radius);
+		}	
+	
+	}
+}
+
+function NumberHelper()
+{
+	// static class
+}
+{
+	NumberHelper.min = function(value0, value1)
+	{
+		return (value0 < value1 ? value0 : value1);
+	}
+
+	NumberHelper.max = function(value0, value1)
+	{
+		return (value0 > value1 ? value0 : value1);
+	}
+
+	NumberHelper.wrapValueToRangeMinMax = function(numberToWrap, rangeMin, rangeMax)
+	{
+		var rangeSize = rangeMax - rangeMin;
+
+		while (numberToWrap < rangeMin)
+		{
+			numberToWrap += rangeSize;
+		}
+
+		while (numberToWrap >= rangeMax)
+		{
+			numberToWrap -= rangeSize;
+		}
+
+		return numberToWrap;
+	}
+}
+
+function Orientation(forward, down)
+{
+	this.forward = forward.clone().normalize();
+	this.down = down.clone().normalize();
+	this.right = this.down.clone().crossProduct(this.forward).normalize();
+
+	this.down = this.forward.clone().crossProduct(this.right).normalize();
+
+	this.axes = 
+	[
+		this.forward,
+		this.right,
+		this.down,
+	];
+}
+{
+	Orientation.prototype.clone = function()
+	{
+		return new Orientation
+		(
+			this.forward,
+			this.down
+		);
+	}
+
+	Orientation.prototype.overwriteWith = function(other)
+	{
+		this.forward.overwriteWith(other.forward);
+		this.right.overwriteWith(other.right);
+		this.down.overwriteWith(other.down);
+
+		return this;
+	}
+}
+
+function Scene
+(
+	mesh,
+	camera
+)
+{
+	this.mesh = mesh;
+	this.camera = camera;
+}
+{
+	Scene.prototype.updateForTimerTick = function()
+	{
+		this.camera.updateForTimerTick();
+
+		Globals.Instance.displayHelper.drawScene
+		(
+			this
+		);
+	}
+}
+
+function SceneViewer(scene)
+{
+	this.scene = scene;
+}
+{
+	SceneViewer.prototype.updateForTimerTick = function()
+	{
+		this.scene.updateForTimerTick();
+	}
+}
+
+function Vertex(pos, depth, altitude)
+{
+	this.pos = pos;
+	this.depth = (depth == null ? 0 : depth);
+	this.altitude = (altitude == null ? 0.5 : altitude);
+
+	this.edges = [];
+	this.faces = [];
+}
+{
+	// static methods
+
+	Vertex.interpolate = function(vertex0, vertex1)
+	{
+		var pos = vertex0.pos.clone().add
+		(
+			vertex1.pos
+		).divideScalar
+		(
+			2
+		);
+
+		var depth = vertex0.depth + 1;
+
+		var altitudeInterpolated = 
+		(
+			vertex0.altitude 
+			+ vertex1.altitude
+		) / 2;
+
+		var altitudeOffsetMax = 1 / Math.pow(2, depth);
+
+		var random = 2 * Math.random() - 1;
+
+		var altitudeOffset = random * altitudeOffsetMax;
+
+		var altitude = altitudeInterpolated + altitudeOffset;
+
+		var returnValue = new Vertex
+		(
+			pos,
+			depth,
+			altitude
+		);
+
+		return returnValue;
+	}
+
+
+	// instance methods
+
+	Vertex.prototype.clone = function()
+	{
+		return new Vertex
+		(
+			this.pos.clone(), this.depth, this.altitude
+		);
+	}
+
+	Vertex.positionsForMany = function(vertices)
+	{
+		var returnValues = [];
+
+		for (var i = 0; i < vertices.length; i++)
+		{
+			returnValues.push(vertices[i].pos);
+		}
+
+		return returnValues;
+	}
+}
+
+// run
+
+main();
+
+</script>
+</body>
+</html>
